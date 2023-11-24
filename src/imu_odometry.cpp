@@ -35,7 +35,7 @@ class ImuOdometry : public rclcpp::Node
       bias_acc_.setZero();
       bias_gyr_.setZero();
       // TODO:: initialize traj_store_path_ here
-      traj_store_path_ = "/home/zy/ws/collaborative_slam_fullstack/result/imu_odometry_test.txt"
+      traj_store_path_ = "/home/zy/ws/collaborative_slam_fullstack/result/imu_odometry_test.txt";
     }
 
   private:
