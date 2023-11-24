@@ -9,6 +9,8 @@
 #include <Eigen/Core>
 #include <unsupported/Eigen/MatrixFunctions>
 
+Eigen::Vector3d gravity(0,0,-9.8);
+
 class ImuOdometry : public rclcpp::Node
 {
   public:
@@ -16,7 +18,7 @@ class ImuOdometry : public rclcpp::Node
     : Node("imu_odometry")
     {
       subscription_ = this->create_subscription<sensor_msgs::msg::Imu>(
-      "topic", 10, std::bind(&ImuOdometry::topic_callback, this, std::placeholders::_1));
+      "/camera/imu", 10, std::bind(&ImuOdometry::topic_callback, this, std::placeholders::_1));
       initialized_ = false;
 
       integration_R_.setIdentity();
@@ -35,7 +37,7 @@ class ImuOdometry : public rclcpp::Node
       bias_acc_.setZero();
       bias_gyr_.setZero();
       // TODO:: initialize traj_store_path_ here
-      traj_store_path_ = "/home/zy/ws/collaborative_slam_fullstack/result/imu_odometry_test.txt";
+      traj_store_path_ = "/home/zy/ws/inertial_ws/result/imu_odometry_test.txt";
     }
 
   private:
@@ -68,8 +70,8 @@ class ImuOdometry : public rclcpp::Node
             delta_R = skew(m_gyro * delta_t).exp();
 
             integration_R_ = normalize_rotation(integration_R_ * delta_R);
-            integration_p_ += 0.5 * integration_R_ * m_accel * delta_t * delta_t + integration_v_ * delta_t;
-            integration_v_ += integration_R_ * m_accel * delta_t;
+            integration_p_ += 0.5 * integration_R_ * m_accel * delta_t * delta_t + integration_v_ * delta_t + 0.5 * gravity * delta_t * delta_t;
+            integration_v_ += integration_R_ * m_accel * delta_t + gravity * delta_t;
 
             save_trajectory_to_file(integration_R_,integration_p_,current_time_);
         } else{
