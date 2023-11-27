@@ -9,6 +9,8 @@
 #include <Eigen/Core>
 #include <unsupported/Eigen/MatrixFunctions>
 
+#include <cmath>
+
 Eigen::Vector3d gravity(0,0,-9.8);
 
 class ImuOdometry : public rclcpp::Node
@@ -33,16 +35,23 @@ class ImuOdometry : public rclcpp::Node
       last_acc_.setZero();
       last_gyr_.setZero();
 
-      // TODO:: initialize bias here
       bias_acc_.setZero();
       bias_gyr_.setZero();
-      // TODO:: initialize traj_store_path_ here
+
       traj_store_path_ = "/home/zy/ws/inertial_ws/result/imu_odometry_test.txt";
+      debug_output_path_ = "/home/zy/ws/inertial_ws/result/debug.txt";
+      debug_stream_.open(debug_output_path_.c_str());
+
+      if (!debug_stream_.is_open())
+      {
+        std::cerr << "Failed to create debug output file " << "\n";
+      }
     }
 
   private:
     void topic_callback(const sensor_msgs::msg::Imu::ConstSharedPtr imu_msg)
     {
+        debug_stream_ << "---------------function void topic_callback() START!---------------\n";
         // parse the msg
         double ax = imu_msg->linear_acceleration.x;
         double ay = imu_msg->linear_acceleration.y;
@@ -60,8 +69,10 @@ class ImuOdometry : public rclcpp::Node
 
         if(initialized_)
         {
+            debug_stream_ << "Start to integrate!\n";
             // do integration
             double delta_t = current_time_ - last_time_;
+            debug_stream_ << "Delta time is :\n" << delta_t << "\n";
 
             Eigen::Vector3d m_gyro = (current_gyr_ + last_gyr_)/2;
             Eigen::Vector3d m_accel = (current_acc_ + last_acc_)/2;
@@ -69,34 +80,63 @@ class ImuOdometry : public rclcpp::Node
             Eigen::Matrix3d delta_R;
             delta_R = skew(m_gyro * delta_t).exp();
 
-            integration_R_ = normalize_rotation(integration_R_ * delta_R);
+            Eigen::Vector3d transformed_acc = integration_R_ * m_accel;
+            debug_stream_ << "The transformed_acc is : \n" << transformed_acc << "\n";
+
+            Eigen::Vector3d final_acc = integration_R_ * m_accel + gravity;
+            debug_stream_ << "The final_acc is : \n" << final_acc << "\n";
+
             integration_p_ += 0.5 * integration_R_ * m_accel * delta_t * delta_t + integration_v_ * delta_t + 0.5 * gravity * delta_t * delta_t;
             integration_v_ += integration_R_ * m_accel * delta_t + gravity * delta_t;
+            integration_R_ = normalize_rotation(integration_R_ * delta_R);
+            
+            debug_stream_ << "integration_R_ is :\n" << integration_R_ << "\n";
+            debug_stream_ << "integration_p_ is :\n" << integration_p_ << "\n";
+            debug_stream_ << "integration_v_ is :\n" << integration_v_ << "\n";
 
             save_trajectory_to_file(integration_R_,integration_p_,current_time_);
+            debug_stream_ << "Integration finished!\n";
         } else{
             // initialize
             // 1. compute integration_R_ according to acc and gravity
-            Eigen::Vector3d direction_gravity = current_acc_;
+            debug_stream_ << "Start to initialize!\n";
+            
+            Eigen::Vector3d direction_gravity = -1*current_acc_;
+            debug_stream_ << "The first acc is : \n" << current_acc_ << "\n";
+
             direction_gravity = direction_gravity / direction_gravity.norm();
+            debug_stream_ << "The direction_gravity is : \n" << direction_gravity << "\n";
 
             Eigen::Vector3d gI(0.0, 0.0, -1.0);
-
             Eigen::Vector3d v = gI.cross(direction_gravity); // rotation vector
             const double nv = v.norm();
+
             const double cosg = gI.dot(direction_gravity); // cos(theta)
             const double ang = acos(cosg); //(theta)
 
             Eigen::Vector3d vzg = v * ang / nv; // theta * unit rotation vector
-            integration_R_ = exp_so3(vzg);
+            integration_R_ = exp_so3(vzg).transpose();
+            debug_stream_ << "The transformation from IMU frame to ENU frame is : \n" << integration_R_ << "\n";
+
+            Eigen::Vector3d transformed_direction_gravity = integration_R_ * direction_gravity;
+            debug_stream_ << "The transformed_direction_gravity is : \n" << transformed_direction_gravity << "\n";
+
+            // The following is used to validate:
+            Eigen::Vector3d transformed_acc = (-1)*integration_R_ * current_acc_;
+            debug_stream_ << "The transformed_acc is : \n" << transformed_acc << "\n";
+
+            Eigen::Vector3d residual = transformed_acc - gravity;
+            debug_stream_ << "The residual between transformed_acc and gravity is : \n" << residual << "\n";
 
             // 2. change flag to represent initialize completed
             initialized_ = true;
+            debug_stream_ << "Initialization finished!\n";
         }
 
         last_time_ = current_time_;
         last_acc_ = current_acc_;
         last_gyr_ = current_gyr_;
+        debug_stream_ << "---------------function void topic_callback() END!---------------\n";
     }
 
     Eigen::Matrix3d skew(const Eigen::Vector3d& v)
@@ -152,6 +192,9 @@ class ImuOdometry : public rclcpp::Node
     Eigen::Vector3d bias_acc_, bias_gyr_;
 
     std::string traj_store_path_;
+    std::string debug_output_path_;
+
+    std::ofstream debug_stream_;
 };
 
 int main(int argc, char * argv[])
